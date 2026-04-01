@@ -99,16 +99,18 @@ function parseFlaggedItems(resultText) {
   const text = String(resultText || "").trim();
   if (!text) return [];
   const blockRegex =
-    /Risk:\s*([^\n]+)\n+Reason:\s*([^\n]+)(?:\n+Note:\s*([^\n]+))?/gi;
+    /Risk:\s*([^\n]+)\n+(?:Trigger:\s*([^\n]+)\n+)?Reason:\s*([^\n]+)(?:\n+Note:\s*([^\n]+))?/gi;
   const structured = [];
   let match;
   while ((match = blockRegex.exec(text)) !== null) {
     const ingredient = (match[1] || "").trim();
-    const reason = (match[2] || "").trim();
-    const note = (match[3] || "").trim();
+    const trigger = (match[2] || "").trim();
+    const reason = (match[3] || "").trim();
+    const note = (match[4] || "").trim();
+    const evidenceLine = trigger ? `Trigger: ${trigger}\n` : "";
     const explanation = note
-      ? `${reason}\nNote: ${note}`
-      : `${reason}\nNote: None`;
+      ? `${evidenceLine}${reason}\nNote: ${note}`
+      : `${evidenceLine}${reason}\nNote: None`;
     structured.push({
       ingredient: ingredient || "Flagged ingredient",
       explanation,

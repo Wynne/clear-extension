@@ -1,15 +1,31 @@
 const STORAGE_KEY = "clearAllergens";
 const LATEST_SCAN_KEY = "clearLatestScan";
 
-const USER_PROMPT_INSTRUCTIONS = `Compare these ingredients and safety statements to the user's allergies.
+const USER_PROMPT_INSTRUCTIONS = `You are a Universal Ingredient Expert—equally versed in food allergen science and in cosmetic/household product chemistry (INCI names, surfactants, preservatives, fragrances).
+
+Context: You will analyze labels from both Food (groceries) and Chemical domains (beauty, personal care, household). Infer the primary domain from what you see: typical food ingredient lists vs INCI-style names, CAS-like patterns, long systematic chemical names, or clear product-type cues in the text. Apply the scientific logic that fits that domain. If the list is mixed, evaluate each hit with the appropriate lens (food vs formulation chemistry).
+
+Medical and formulation knowledge: Understand botanical cross-reactivity for foods, and documented formulation-derived links for cosmetics (e.g. coconut / coconut oil derivatives vs surfactants built from those feedstocks).
+
+Food cross-reactivity (examples—be aggressive when these patterns apply): Pistachio allergy ↔ Cashew; Pecan allergy ↔ Walnut; Prawn or shrimp allergy ↔ other crustaceans named in the list (crab, lobster, crawfish, krill, etc.). Use the same discipline for other established food groups only (e.g. related tree nuts, crustacean class).
+
+Chemical / formulation cross-reactivity (examples): Coconut or coconut-oil allergy ↔ ingredients clearly derived from coconut feedstock, such as Cocamidopropyl Betaine, coco-glucoside, sodium coco-sulfate, and similar INCI names that indicate coconut origin—when such a derivative appears and matches the user's flagged chemical/skin concern, treat as high risk.
+
+Cross-reactivity wording: When you flag because of cross-reactivity (not only a literal string match to the user's list entry), the Reason must say exactly: Flagged because [Ingredient] is cross-reactive with your [Allergen] allergy.
+
+Balance: Be aggressive for established food cousins and for well-documented formulation derivatives (as above). For unrelated items with no direct match, true derivative, or established cross-reactive link, you MUST return SAFE. Do not equate shea butter with peanut, and do not flag stearic acid as nut-derived unless the label specifies animal or problematic source.
 
 Rules:
-1) No Safe Lists: Do NOT list any safe ingredients. If the product is safe, respond strictly with: SAFE
-2) Cross-Contamination: Check for statements such as "may contain", "processed in a facility with", or similar contamination warnings. If found, include a cross-contamination warning.
-3) Format: If any risk is found, respond exactly in this structure:
+1) Doubt Rule (non-cousin / non-derivative cases): If you are not 100% certain there is a direct match, true derivative, or an established food/chemical cross-reactivity link, you MUST return SAFE.
+2) No Safe Lists: Do NOT list safe ingredients. If the product is safe, respond exactly with: SAFE
+3) Context awareness: For grocery tree-nut allergy, coconut is not a tree nut; for coconut-specific allergy on cosmetic labels, still evaluate coconut-derived INCI ingredients per Chemical cross-reactivity above. Shea butter is not peanut. Stearic acid is usually vegetable-based unless the label states otherwise.
+4) Evidence requirement: If you flag risk, you MUST provide the exact word from the provided ingredient text that triggered the flag (the ingredient name as written). If you cannot identify a specific triggering word from the provided text, return SAFE.
+5) Cross-contamination: Check for "may contain", "processed in a facility with", or similar warnings and include them only when present.
+6) Format for risk responses:
 Risk: [Ingredient Name]
-Reason: [Why it matches the user's allergy]
-Note: [Cross-contamination warnings if applicable, otherwise "None"]
+Trigger: [Exact word copied from the ingredient text]
+Reason: [Specific reason; use the cross-reactivity sentence above when applicable]
+Note: [Cross-contamination warning if applicable, otherwise "None"]
 
 Use English only.`;
 
@@ -309,6 +325,29 @@ function responseLooksSafe(responseText) {
   return false;
 }
 
+function parseRiskResponse(responseText) {
+  const text = String(responseText || "").trim();
+  const risk = text.match(/^Risk:\s*(.+)$/im);
+  const trigger = text.match(/^Trigger:\s*(.+)$/im);
+  const reason = text.match(/^Reason:\s*(.+)$/im);
+  const note = text.match(/^Note:\s*(.+)$/im);
+  return {
+    risk: risk ? risk[1].trim() : "",
+    trigger: trigger ? trigger[1].trim() : "",
+    reason: reason ? reason[1].trim() : "",
+    note: note ? note[1].trim() : "",
+  };
+}
+
+function hasAnyAllergies(allergens) {
+  return (
+    (allergens.food?.length || 0) +
+      (allergens.chemicals?.length || 0) +
+      (allergens.skin?.length || 0) >
+    0
+  );
+}
+
 let activeScanToken = 0;
 let delayedScanTimer = null;
 let lastSeenUrl = window.location.href;
@@ -338,9 +377,11 @@ async function runOnce(ingredientText, token) {
 
   const allergens = await loadAllergens();
   if (isStaleToken(token)) return;
-  const totalListed =
-    allergens.food.length + allergens.chemicals.length + allergens.skin.length;
-  if (totalListed === 0) return;
+  if (!hasAnyAllergies(allergens)) {
+    notifyBadge("CLEAR_SCAN_IDLE");
+    clearLatestScan();
+    return;
+  }
 
   let session;
   try {
@@ -401,6 +442,20 @@ async function runOnce(ingredientText, token) {
     return;
   }
 
+  // Guardrail: if model cannot provide exact trigger evidence from ingredient text,
+  // we treat uncertain/non-compliant output as SAFE to reduce false positives.
+  const parsed = parseRiskResponse(text);
+  const normalizedIngredients = ingredientText.toLowerCase();
+  const trigger = parsed.trigger.toLowerCase();
+  const triggerFoundInIngredients =
+    trigger.length > 0 && normalizedIngredients.includes(trigger);
+  if (!parsed.risk || !parsed.reason || !triggerFoundInIngredients) {
+    console.log("Clear: Non-evidenced risk output, forcing SAFE");
+    notifyBadge("CLEAR_SCAN_SAFE");
+    saveLatestScan("SAFE", "SAFE");
+    return;
+  }
+
   notifyBadge("CLEAR_SCAN_ALERT");
   saveLatestScan("ALERT", text.trim());
 }
@@ -446,6 +501,14 @@ async function main(token) {
   if (!isProductPage() || isStaleToken(token)) {
     console.log("Clear: Not a supported Amazon product URL, skipping scan");
     notifyBadge("CLEAR_SCAN_IDLE");
+    return;
+  }
+  const allergens = await loadAllergens();
+  if (isStaleToken(token)) return;
+  if (!hasAnyAllergies(allergens)) {
+    console.log("Clear: No allergy targets configured, skipping AI scan");
+    notifyBadge("CLEAR_SCAN_IDLE");
+    clearLatestScan();
     return;
   }
   console.log("Clear: Amazon Product Page detected");
