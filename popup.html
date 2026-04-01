@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clear</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="popup-header">
+      <h1 class="popup-title">Clear</h1>
+      <p class="popup-sub">Safety Report powered by on-device AI.</p>
+    </header>
+
+    <main class="popup-main">
+      <section class="report-view" id="report-view">
+        <article class="report-card">
+          <p class="report-label">Safety Report</p>
+          <h2 class="report-header" id="report-header">CLEAN</h2>
+          <p class="report-sub" id="report-sub">
+            Welcome to Clear! Go to any Amazon product page (Food, Beauty, or Household) and I will automatically scan the ingredients for you.
+          </p>
+          <ul class="report-list" id="report-list"></ul>
+        </article>
+      </section>
+
+      <section class="manage-view hidden" id="manage-view">
+        <section class="category" data-category="food">
+          <h2 class="category-title">Food</h2>
+          <div class="add-row">
+            <input
+              type="text"
+              class="add-input"
+              placeholder="e.g. peanuts, dairy"
+              autocomplete="off"
+              aria-label="Add food allergen"
+            />
+            <button type="button" class="btn btn-add">Add</button>
+          </div>
+          <ul class="tag-list" aria-live="polite"></ul>
+        </section>
+
+        <section class="category" data-category="chemicals">
+          <h2 class="category-title">Chemicals</h2>
+          <div class="add-row">
+            <input
+              type="text"
+              class="add-input"
+              placeholder="e.g. formaldehyde, parabens"
+              autocomplete="off"
+              aria-label="Add chemical to avoid"
+            />
+            <button type="button" class="btn btn-add">Add</button>
+          </div>
+          <ul class="tag-list" aria-live="polite"></ul>
+        </section>
+
+        <section class="category" data-category="skin">
+          <h2 class="category-title">Skin irritants</h2>
+          <div class="add-row">
+            <input
+              type="text"
+              class="add-input"
+              placeholder="e.g. fragrance, SLS"
+              autocomplete="off"
+              aria-label="Add skin irritant"
+            />
+            <button type="button" class="btn btn-add">Add</button>
+          </div>
+          <ul class="tag-list" aria-live="polite"></ul>
+        </section>
+      </section>
+    </main>
+    <footer class="popup-footer">
+      <button type="button" class="btn btn-manage" id="toggle-manage-btn">
+        Manage my list
+      </button>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

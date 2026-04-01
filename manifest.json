@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Clear",
+  "version": "1.0.0",
+  "description": "Scan Amazon product pages for allergens using on-device AI (Gemini Nano).",
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": ["*://*.amazon.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Clear — Allergen list"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.amazon.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
