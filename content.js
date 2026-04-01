@@ -13,7 +13,7 @@ Note: [Cross-contamination warnings if applicable, otherwise "None"]
 
 Use English only.`;
 
-console.log("Clear: Extension loaded");
+console.log("Clear: Extension loaded", window.location.href);
 
 function errorMessage(err) {
   return err instanceof Error ? err.message : String(err);
@@ -235,13 +235,8 @@ function loadAllergens() {
 async function createTextSession() {
   const ai = typeof globalThis !== "undefined" ? globalThis.ai : undefined;
 
-  if (ai && typeof ai.createTextSession === "function") {
-    console.log("Clear: Starting AI Session");
-    const sessionOptions = await resolveTextSessionOptionsFromAi(ai);
-    return ai.createTextSession(sessionOptions);
-  }
-
   if (typeof LanguageModel !== "undefined" && LanguageModel.create) {
+    console.log("Clear: Starting AI Session (LanguageModel)");
     const createOpts = {
       monitor: downloadProgressMonitor,
       expectedInputs: [{ type: "text", languages: ["en"] }],
@@ -256,6 +251,12 @@ async function createTextSession() {
       createOpts.temperature = lmOpts.temperature;
     }
     return LanguageModel.create(createOpts);
+  }
+
+  if (ai && typeof ai.createTextSession === "function") {
+    console.log("Clear: Starting AI Session (window.ai)");
+    const sessionOptions = await resolveTextSessionOptionsFromAi(ai);
+    return ai.createTextSession(sessionOptions);
   }
 
   throw new Error(
@@ -410,7 +411,9 @@ function waitForRelevantText(maxMs = 45000, intervalMs = 1500) {
 }
 
 async function main() {
+  console.log("Clear: Main started");
   if (!isProductPage()) {
+    console.log("Clear: Not a supported Amazon product URL, skipping scan");
     notifyBadge("CLEAR_SCAN_IDLE");
     return;
   }
@@ -420,7 +423,10 @@ async function main() {
   saveLatestScan("SCANNING", "AI scan in progress...");
 
   const text = await waitForRelevantText();
-  if (!text) return;
+  if (!text) {
+    console.log("Clear: No ingredient text detected during scan window");
+    return;
+  }
 
   console.log("Clear: Ingredients found");
 
