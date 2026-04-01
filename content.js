@@ -41,6 +41,10 @@ function saveLatestScan(status, resultText) {
   chrome.storage.local.set({ [LATEST_SCAN_KEY]: payload });
 }
 
+function clearLatestScan() {
+  chrome.storage.local.remove([LATEST_SCAN_KEY]);
+}
+
 /** On-device Gemini Nano often needs well over 5s for the first prompt after load. */
 const AI_PROMPT_TIMEOUT_MS = 120000;
 
@@ -305,11 +309,35 @@ function responseLooksSafe(responseText) {
   return false;
 }
 
-async function runOnce(ingredientText) {
-  if (!isProductPage()) return;
+let activeScanToken = 0;
+let delayedScanTimer = null;
+let lastSeenUrl = window.location.href;
+
+function isStaleToken(token) {
+  return token !== activeScanToken;
+}
+
+function hasVisibleIngredientsSection() {
+  const candidates = document.querySelectorAll(
+    "h1, h2, h3, h4, h5, th, .a-text-bold, span.a-size-base.a-text-bold"
+  );
+  for (const el of candidates) {
+    const txt = String(el.textContent || "").trim().toLowerCase();
+    if (!txt) continue;
+    if (!txt.includes("ingredients") && !txt.includes("important information")) {
+      continue;
+    }
+    if (el.offsetParent !== null) return true;
+  }
+  return false;
+}
+
+async function runOnce(ingredientText, token) {
+  if (!isProductPage() || isStaleToken(token)) return;
   if (!ingredientText || !String(ingredientText).trim()) return;
 
   const allergens = await loadAllergens();
+  if (isStaleToken(token)) return;
   const totalListed =
     allergens.food.length + allergens.chemicals.length + allergens.skin.length;
   if (totalListed === 0) return;
@@ -318,6 +346,7 @@ async function runOnce(ingredientText) {
   try {
     session = await createTextSession();
   } catch (e) {
+    if (isStaleToken(token)) return;
     console.log("Clear: " + errorMessage(e));
     saveLatestScan("ERROR", "Failed to start AI session: " + errorMessage(e));
     return;
@@ -331,6 +360,7 @@ async function runOnce(ingredientText) {
       AI_PROMPT_TIMEOUT_MS
     );
   } catch (e) {
+    if (isStaleToken(token)) return;
     if (e && e.code === "CLEAR_AI_TIMEOUT") {
       saveLatestScan("ERROR", "AI timed out before returning a response.");
       try {
@@ -358,6 +388,7 @@ async function runOnce(ingredientText) {
   } catch (_) {
     /* ignore */
   }
+  if (isStaleToken(token)) return;
 
   console.log("Clear: AI Session Response:", raw);
 
@@ -410,9 +441,9 @@ function waitForRelevantText(maxMs = 45000, intervalMs = 1500) {
   });
 }
 
-async function main() {
+async function main(token) {
   console.log("Clear: Main started");
-  if (!isProductPage()) {
+  if (!isProductPage() || isStaleToken(token)) {
     console.log("Clear: Not a supported Amazon product URL, skipping scan");
     notifyBadge("CLEAR_SCAN_IDLE");
     return;
@@ -423,13 +454,68 @@ async function main() {
   saveLatestScan("SCANNING", "AI scan in progress...");
 
   const text = await waitForRelevantText();
+  if (isStaleToken(token)) return;
   if (!text) {
     console.log("Clear: No ingredient text detected during scan window");
+    notifyBadge("CLEAR_SCAN_IDLE");
+    saveLatestScan(
+      "NOT_FOUND",
+      "No ingredient text detected on this page. Please check the product images or description manually."
+    );
     return;
   }
 
   console.log("Clear: Ingredients found");
 
-  await runOnce(text);
+  await runOnce(text, token);
 }
-main();
+
+function scheduleVariantScan() {
+  const token = ++activeScanToken;
+  if (delayedScanTimer) clearTimeout(delayedScanTimer);
+
+  notifyBadge("CLEAR_SCAN_IDLE");
+  clearLatestScan();
+
+  delayedScanTimer = setTimeout(async () => {
+    if (isStaleToken(token)) return;
+    if (!isProductPage()) {
+      notifyBadge("CLEAR_SCAN_IDLE");
+      return;
+    }
+
+    // Give Amazon time to render updated variant details before scanning.
+    const visible = hasVisibleIngredientsSection();
+    const extracted = extractRelevantText();
+    if (!visible && !extracted) {
+      notifyBadge("CLEAR_SCAN_IDLE");
+      saveLatestScan(
+        "NOT_FOUND",
+        "No ingredient text detected on this page. Please check the product images or description manually."
+      );
+      return;
+    }
+
+    await main(token);
+  }, 2000);
+}
+
+function maybeHandleUrlChange() {
+  const href = window.location.href;
+  if (href === lastSeenUrl) return;
+  lastSeenUrl = href;
+  console.log("Clear: URL changed, scheduling rescan");
+  scheduleVariantScan();
+}
+
+function installUrlListener() {
+  if (window.navigation && typeof window.navigation.addEventListener === "function") {
+    window.navigation.addEventListener("navigate", () => {
+      maybeHandleUrlChange();
+    });
+  }
+  setInterval(maybeHandleUrlChange, 500);
+}
+
+installUrlListener();
+scheduleVariantScan();
